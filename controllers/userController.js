@@ -4,6 +4,7 @@ import { User } from "../models/userModel.js";
 import { sendEmail } from "../utils/sendEmail.js";
 import twilio from "twilio";
 import bcrypt from "bcrypt";
+import { sendToken } from "../utils/sendToken.js";
 
 const client = twilio(process.env.TWILIO_SID, process.env.TWILIO_AUTH_TOKEN);
 
@@ -113,3 +114,79 @@ function generateEmailTemplate(verificationCode) {
     </div>
   `;
 }
+
+
+export const verifyOtp = catchAsyncError(async(req,res,next)=>{
+  const {email,otp,phone}=req.body;
+  function validatePhoneNumber(phone) {
+    const phoneRegex = /^\+880\d{10}$/;
+    return phoneRegex.test(phone);
+  }
+
+  if (!validatePhoneNumber(phone)) {
+    return next(new ErrorHandler("অবৈধ ফোন নম্বর।", 400));
+  }
+try {
+  const allUserEntrys= await User.find({
+    $or:[
+      {
+        email,accountVerified:false,
+      },
+      {
+        phone,accountVerified:false,
+      },
+    ]
+  }).sort({createdAt:-1})
+  if(!allUserEntrys){
+          return next(new ErrorHandler("user action not found", 400));
+
+
+    
+  }
+  let user;
+  if(allUserEntrys.length>1){
+    user=allUserEntrys[0];
+    await User.deleteMany({
+      _id:{$ne:user._id},
+      $or:[
+        {
+          email,accountVerified:false,
+          
+        },
+        {
+          phone,accountVerified:false
+        }
+      ]
+    });
+  }else{
+    user=allUserEntrys[0];
+
+  }
+  if(user.verificationCode !== Number(otp)){
+      return next(new ErrorHandler("invalid otp", 400));
+
+  }
+
+const currentTime=Date.now()
+const verificationCodeExpire=new Date(
+user.verificationCodeExpire
+).getTime();
+console.log(currentTime)
+console.log(verificationCodeExpire)
+if(currentTime>verificationCodeExpire){
+      return next(new ErrorHandler("otp expired", 400));
+
+}
+
+user.accountVerified=true;
+user.verificationCode=null;
+user.verificationCodeExpire=null;
+await user.save({
+  validateModifiedOnly:true})
+  sendToken(user,200,"account veify",res)
+} catch (error) {
+   console.log(error);
+      return next(new ErrorHandler("verify otp controller err", 400));
+  
+}
+})
