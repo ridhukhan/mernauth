@@ -3,144 +3,113 @@ import { catchAsyncError } from "../middlewares/catchAsyncError.js";
 import { User } from "../models/userModel.js";
 import { sendEmail } from "../utils/sendEmail.js";
 import twilio from "twilio";
-
+import bcrypt from "bcrypt";
 
 const client = twilio(process.env.TWILIO_SID, process.env.TWILIO_AUTH_TOKEN);
 
 export const register = catchAsyncError(async (req, res, next) => {
-  try {
-    const { name, email, phone, password, verificationMethod } = req.body;
-    if (!name || !email || !phone || !password || !verificationMethod) {
-      return next(new ErrorHandler("All fields are required.", 400));
-    }
-    function validatePhoneNumber(phone) {
-      const phoneRegex = /^\+880\d{10}$/;
-      return phoneRegex.test(phone);
-    }
-
-    if (!validatePhoneNumber(phone)) {
-      return next(new ErrorHandler("Invalid phone number.", 400));
-    }
-
-    const existingUser = await User.findOne({
-      $or: [
-        {
-          email,
-          accountVerified: true,
-        },
-        {
-          phone,
-          accountVerified: true,
-        },
-      ],
-    });
-
-    if (existingUser) {
-      return next(new ErrorHandler("Phone or Email is already used.", 400));
-    }
-
-    const registerationAttemptsByUser = await User.find({
-      $or: [
-        { phone, accountVerified: false },
-        { email, accountVerified: false },
-      ],
-    });
-
-    if (registerationAttemptsByUser.length > 100) {
-      return next(
-        new ErrorHandler(
-          "You have exceeded the maximum number of attempts (100). Please try again after an hour.",
-          400
-        )
-      );
-    }
-
-    const userData = {
-      name,
-      email,
-      phone,
-      password,
-    };
-
-    const user = await User.create(userData);
-    const verificationCode = await user.generateVerificationCode();
-    await user.save();
-    sendVerificationCode(
-      verificationMethod,
-      verificationCode,
-      name,
-      email,
-      phone,
-      res
-    );
-  } catch (error) {
-    next(error);
+  const { username, email, phone, password, verificationMethod } = req.body;
+  
+  if (!username || !email || !phone || !password || !verificationMethod) {
+    return next(new ErrorHandler("সকল ফিল্ড প্রয়োজনীয়।", 400));
   }
-});
 
-async function sendVerificationCode(
-  verificationMethod,
-  verificationCode,
-  name,
-  email,
-  phone,
-  res
-) {
-  try {
-    if (verificationMethod === "email") {
-      const message = generateEmailTemplate(verificationCode);
-      sendEmail({ email, subject: "Your Verification Code", message });
-      res.status(200).json({
-        success: true,
-        message: `Verification email successfully sent to ${name}`,
-      });
-    } else if (verificationMethod === "phone") {
-      const verificationCodeWithSpace = verificationCode
+  function validatePhoneNumber(phone) {
+    const phoneRegex = /^\+880\d{10}$/;
+    return phoneRegex.test(phone);
+  }
+
+  if (!validatePhoneNumber(phone)) {
+    return next(new ErrorHandler("অবৈধ ফোন নম্বর।", 400));
+  }
+
+  const existingUser = await User.findOne({
+    $or: [
+      { email, accountVerified: true },
+      { phone, accountVerified: true },
+    ],
+  });
+
+  if (existingUser) {
+    return next(new ErrorHandler("এই ফোন বা ইমেইল ইতিমধ্যে ব্যবহৃত।", 400));
+  }
+
+  const registerationAttemptsByUser = await User.find({
+    $or: [
+      { phone, accountVerified: false },
+      { email, accountVerified: false },
+    ],
+  });
+
+  if (registerationAttemptsByUser.length > 100) {
+    return next(
+      new ErrorHandler(
+        "আপনি সর্বাধিক চেষ্টার সংখ্যা অতিক্রম করেছেন (100)।",
+        400
+      )
+    );
+  }
+
+  const hashedPassword = await bcrypt.hash(password, 10);
+
+  const user = await User.create({
+    username,
+    email,
+    phone,
+    password: hashedPassword,
+  });
+
+  const verificationCode = await user.generateVerificationCode();
+  await user.save();
+
+  if (verificationMethod === "email") {
+    const message = generateEmailTemplate(verificationCode);
+    await sendEmail({
+      email,
+      subject: "আপনার যাচাইকরণ কোড",
+      message,
+    });
+
+    res.status(200).json({
+      success: true,
+      message: `যাচাইকরণ ইমেইল ${username} এর কাছে পাঠানো হয়েছে`,
+    });
+  } else if (verificationMethod === "phone") {
+    const verificationCodeWithSpace = verificationCode
         .toString()
         .split("")
         .join(" ");
-      await client.calls.create({
-        twiml: `<Response><Say>Your verification code is ${verificationCodeWithSpace}. Your verification code is ${verificationCodeWithSpace}.</Say></Response>`,
+      await client.messages.create({
         from: process.env.TWILIO_PHONE_NUMBER,
         to: phone,
+        body:`your verification code is ${verificationCodeWithSpace}`
       });
       res.status(200).json({
         success: true,
         message: `OTP sent.`,
       });
-    } else {
-      return res.status(500).json({
-        success: false,
-        message: "Invalid verification method.",
-      });
-    }
-  } catch (error) {
-    console.log(error);
-    return res.status(500).json({
-      success: false,
-      message: "Verification code failed to send.",
-    });
+  } else {
+    return next(new ErrorHandler("অবৈধ যাচাইকরণ পদ্ধতি।", 400));
   }
-}
+});
 
 function generateEmailTemplate(verificationCode) {
   return `
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #ddd; border-radius: 8px; background-color: #f9f9f9;">
-      <h2 style="color: #4CAF50; text-align: center;">Verification Code</h2>
-      <p style="font-size: 16px; color: #333;">Dear User,</p>
-      <p style="font-size: 16px; color: #333;">Your verification code is:</p>
+      <h2 style="color: #4CAF50; text-align: center;">যাচাইকরণ কোড</h2>
+      <p style="font-size: 16px; color: #333;">প্রিয় ব্যবহারকারী,</p>
+      <p style="font-size: 16px; color: #333;">আপনার যাচাইকরণ কোড:</p>
       <div style="text-align: center; margin: 20px 0;">
         <span style="display: inline-block; font-size: 24px; font-weight: bold; color: #4CAF50; padding: 10px 20px; border: 1px solid #4CAF50; border-radius: 5px; background-color: #e8f5e9;">
           ${verificationCode}
         </span>
       </div>
-      <p style="font-size: 16px; color: #333;">Please use this code to verify your email address. The code will expire in 10 minutes.</p>
-      <p style="font-size: 16px; color: #333;">If you did not request this, please ignore this email.</p>
+      <p style="font-size: 16px; color: #333;">এই কোডটি ব্যবহার করে আপনার ইমেইল যাচাই করুন। কোডটি 10 মিনিটে শেষ হবে।</p>
+      <p style="font-size: 16px; color: #333;">যদি আপনি এটি অনুরোধ না করেন তবে এই ইমেইল উপেক্ষা করুন।</p>
       <footer style="margin-top: 20px; text-align: center; font-size: 14px; color: #999;">
-        <p>Thank you,<br>Your Company Team</p>
-        <p style="font-size: 12px; color: #aaa;">This is an automated message. Please do not reply to this email.</p>
+        <p>ধন্যবাদ,<br>আপনার কোম্পানির টিম</p>
+        <p style="font-size: 12px; color: #aaa;">এটি একটি স্বয়ংক্রিয় বার্তা।</p>
       </footer>
     </div>
   `;
 }
-

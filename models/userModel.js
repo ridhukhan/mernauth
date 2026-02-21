@@ -4,12 +4,12 @@ import jwt from "jsonwebtoken";
 import crypto from "crypto";
 
 const userSchema = new mongoose.Schema({
-  name: String,
+  username: String,
   email: String,
   password: {
     type: String,
-    minLength: [8, "Password must have at least 8 characters."],
-    maxLength: [32, "Password cannot have more than 32 characters."],
+    minLength: [8, "পাসওয়ার্ড কমপক্ষে 8 ক্যারেক্টার হতে হবে।"],
+    maxLength: [100, "পাসওয়ার্ড 100 ক্যারেক্টারের বেশি হতে পারে না।"], // ✅ 100 এ বাড়ানো
     select: false,
   },
   phone: String,
@@ -22,13 +22,6 @@ const userSchema = new mongoose.Schema({
     type: Date,
     default: Date.now,
   },
-});
-
-userSchema.pre("save", async function (next) {
-  if (!this.isModified("password")) {
-    next();
-  }
-  this.password = await bcrypt.hash(this.password, 10);
 });
 
 userSchema.methods.comparePassword = async function (enteredPassword) {
@@ -50,6 +43,5 @@ userSchema.methods.generateVerificationCode = function () {
 
   return verificationCode;
 };
-
 
 export const User = mongoose.model("User", userSchema);
