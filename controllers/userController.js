@@ -3,8 +3,9 @@ import { catchAsyncError } from "../middlewares/catchAsyncError.js";
 import { User } from "../models/userModel.js";
 import { sendEmail } from "../utils/sendEmail.js";
 import twilio from "twilio";
-import bcrypt from "bcrypt";
+import bcrypt, { compare } from "bcrypt";
 import { sendToken } from "../utils/sendToken.js";
+import crypto from "crypto"
 
 const client = twilio(process.env.TWILIO_SID, process.env.TWILIO_AUTH_TOKEN);
 
@@ -186,7 +187,114 @@ await user.save({
   sendToken(user,200,"account veify",res)
 } catch (error) {
    console.log(error);
-      return next(new ErrorHandler("verify otp controller err", 400));
+      return next(new ErrorHandler("verify otp controller err", 500));
   
 }
+});
+
+export const login = catchAsyncError(async(req,res,next)=>{
+  const {email,password}=req.body;
+
+  if(!email || !password){
+      return next(new ErrorHandler("all field is required", 400));
+  }
+const user = await User.findOne({
+  email,accountVerified:true,
+}).select("+password")
+if(!user){
+      return next(new ErrorHandler("user not found", 400));
+
+}
+
+const isMatchPass= await user.comparePassword(password) 
+
+if(!isMatchPass){
+      return next(new ErrorHandler("wrong password", 400));
+
+}
+
+sendToken(user,200,"login successfully",res)
+});
+
+export const logout=catchAsyncError(async(req,res,next)=>{
+
+  res.status(200).cookie("token","",{
+     expires: new Date(Date.now()),
+    httpOnly: true,
+  }).json({
+    success:true,
+    message:"logout successfully"
+  })
 })
+export const getUser =catchAsyncError(async(req,res,next)=>{
+  const user=req.user;
+res.status(200).json({
+  success:true,
+  user
+})
+});
+export const forgotpassword = catchAsyncError(async(req,res,next)=>{
+  const {email}=req.body;
+
+  const user = await User.findOne({
+    email,
+    accountVerified:true,
+  });
+  if(!user){
+      return next(new ErrorHandler("this email not found in our database try anouther email", 400));
+
+  }
+
+  const resetToken= user.generateResetPasswordToken();
+  await user.save({validateBeforeSave:false})
+  const resetPasswordUrl= `${process.env.FRONTEND_URL}/password/reset/${resetToken}`
+
+const message =`your resetpassword token is :- \n\n ${resetPasswordUrl} \n\n If you have not requested this email then please ignore it.`;
+
+try {
+ await sendEmail({
+    email,
+    subject:"MERN AUTHENTICATION APP RESET PASSWORD",
+    message
+  })
+  res.status(200).json({
+    success:true,
+    message: `emaii send to ${email} successfullyy`
+  })
+} catch (error) {
+      user.resetPasswordToken = undefined;
+    user.resetPasswordExpire = undefined;
+    await user.save({ validateBeforeSave: false });
+    return next(
+      new ErrorHandler(
+        error.message ? error.message : "Cannot send reset password token.",
+        500
+      )
+    );
+}
+
+})
+
+export const resetPassword = catchAsyncError(async (req,res,next)=>{
+  const {token}=req.params;
+  const resetPasswordToken=crypto.createHash("sha256").update(token).digest("hex")
+
+
+  const user= await User.findOne({
+    resetPasswordToken,
+    resetPasswordExpire:{$gt: Date.now()}
+  })
+  if(!user){
+      return next(new ErrorHandler("Reset token is invalid or has been expired", 400));
+
+  }
+  if(req.body.password !== req.body.confirmPassword){
+    return next(new ErrorHandler("password and confirmpassword do not match", 400));
+
+  }
+  user.password=req.body.password
+  user.resetPasswordToken=undefined;
+  user.resetPasswordExpire=undefined;
+  await user.save();
+  sendToken(user,200,"password reset successfully",res)
+});
