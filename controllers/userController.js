@@ -117,81 +117,76 @@ function generateEmailTemplate(verificationCode) {
 }
 
 
-export const verifyOtp = catchAsyncError(async(req,res,next)=>{
-  const {email,otp,phone}=req.body;
-  function validatePhoneNumber(phone) {
-    const phoneRegex = /^\+880\d{10}$/;
-    return phoneRegex.test(phone);
+export const verifyOtp = catchAsyncError(async (req, res, next) => {
+  const { email, otp, phone, verificationMethod } = req.body;
+
+  // phone validation শুধু phone select করলেই হবে
+  if (verificationMethod === "phone") {
+    function validatePhoneNumber(phone) {
+      const phoneRegex = /^\+880\d{10}$/;
+      return phoneRegex.test(phone);
+    }
+    if (!validatePhoneNumber(phone)) {
+      return next(new ErrorHandler("অবৈধ ফোন নম্বর।", 400));
+    }
   }
 
-  if (!validatePhoneNumber(phone)) {
-    return next(new ErrorHandler("অবৈধ ফোন নম্বর।", 400));
+  try {
+    // email বা phone দিয়ে unverified user খুঁজবো
+    const allUserEntrys = await User.find({
+      $or: [
+        { email, accountVerified: false },
+        { phone, accountVerified: false },
+      ],
+    }).sort({ createdAt: -1 });
+
+    // কোনো user না পেলে
+    if (!allUserEntrys || allUserEntrys.length === 0) {
+      return next(new ErrorHandler("User পাওয়া যায়নি", 400));
+    }
+
+    let user;
+
+    // একই email/phone এ একাধিক entry থাকলে latest টা রাখবো, বাকি delete
+    if (allUserEntrys.length > 1) {
+      user = allUserEntrys[0];
+      await User.deleteMany({
+        _id: { $ne: user._id },
+        $or: [
+          { email, accountVerified: false },
+          { phone, accountVerified: false },
+        ],
+      });
+    } else {
+      user = allUserEntrys[0];
+    }
+
+    // OTP মিলছে কিনা চেক
+    if (user.verificationCode !== Number(otp)) {
+      return next(new ErrorHandler("OTP ভুল হয়েছে", 400));
+    }
+
+    // OTP expire হয়েছে কিনা চেক
+    const currentTime = Date.now();
+    const verificationCodeExpire = new Date(user.verificationCodeExpire).getTime();
+
+    if (currentTime > verificationCodeExpire) {
+      return next(new ErrorHandler("OTP এর মেয়াদ শেষ হয়ে গেছে", 400));
+    }
+
+    // সব ঠিক থাকলে account verify করো
+    user.accountVerified = true;
+    user.verificationCode = null;
+    user.verificationCodeExpire = null;
+    await user.save({ validateModifiedOnly: true });
+
+    sendToken(user, 200, "Account verify সফল হয়েছে", res);
+
+  } catch (error) {
+    console.log(error);
+    return next(new ErrorHandler("OTP verify করতে সমস্যা হয়েছে", 500));
   }
-try {
-  const allUserEntrys= await User.find({
-    $or:[
-      {
-        email,accountVerified:false,
-      },
-      {
-        phone,accountVerified:false,
-      },
-    ]
-  }).sort({createdAt:-1})
-  if(!allUserEntrys){
-          return next(new ErrorHandler("user action not found", 400));
-
-
-    
-  }
-  let user;
-  if(allUserEntrys.length>1){
-    user=allUserEntrys[0];
-    await User.deleteMany({
-      _id:{$ne:user._id},
-      $or:[
-        {
-          email,accountVerified:false,
-          
-        },
-        {
-          phone,accountVerified:false
-        }
-      ]
-    });
-  }else{
-    user=allUserEntrys[0];
-
-  }
-  if(user.verificationCode !== Number(otp)){
-      return next(new ErrorHandler("invalid otp", 400));
-
-  }
-
-const currentTime=Date.now()
-const verificationCodeExpire=new Date(
-user.verificationCodeExpire
-).getTime();
-console.log(currentTime)
-console.log(verificationCodeExpire)
-if(currentTime>verificationCodeExpire){
-      return next(new ErrorHandler("otp expired", 400));
-
-}
-
-user.accountVerified=true;
-user.verificationCode=null;
-user.verificationCodeExpire=null;
-await user.save({
-  validateModifiedOnly:true})
-  sendToken(user,200,"account veify",res)
-} catch (error) {
-   console.log(error);
-      return next(new ErrorHandler("verify otp controller err", 500));
-  
-}
 });
-
 export const login = catchAsyncError(async(req,res,next)=>{
   const {email,password}=req.body;
 
