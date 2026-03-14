@@ -70,7 +70,8 @@ export const register = catchAsyncError(async (req, res, next) => {
 
 export const verifyOtp = catchAsyncError(async (req, res, next) => {
   const { email, otp, phone, verificationMethod } = req.body;
-if (verificationMethod === "phone") {
+
+  if (verificationMethod === "phone") {
     const phoneRegex = /^\+880\d{10}$/;
     if (!phoneRegex.test(phone)) {
       return next(new ErrorHandler("অবৈধ ফোন নম্বর।", 400));
@@ -81,14 +82,13 @@ if (verificationMethod === "phone") {
     verificationMethod === "email"
       ? { email, accountVerified: false }
       : { phone, accountVerified: false }
-  )
- console.log("user found:", user)  // ✅ এটা add করো
-  console.log("verificationCode:", user?.verificationCode)  // ✅ এটা add করো
-  console.log("otp comparison:", user?.verificationCode, "===", Number(otp))  // ✅ এটা add করো
+  );
 
   if (!user) {
-    return next(new ErrorHandler("User পাওয়া যায়নি", 400));
+    return next(new ErrorHandler("User পাওয়া যায়নি বা অ্যাকাউন্ট ইতিমধ্যে ভেরিফাইড", 400));
   }
+
+  console.log("OTP match check:", user.verificationCode, "===", Number(otp));
 
   if (user.verificationCode !== Number(otp)) {
     return next(new ErrorHandler("OTP ভুল হয়েছে", 400));
@@ -101,25 +101,29 @@ if (verificationMethod === "phone") {
   user.accountVerified = true;
   user.verificationCode = null;
   user.verificationCodeExpire = null;
-  await user.save({ validateModifiedOnly: true });
-
   
+  await user.save({ validateBeforeSave: false });
+
   const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET_KEY, {
     expiresIn: process.env.JWT_EXPIRE
-  })
+  });
 
   res.status(200).cookie("token", token, {
     expires: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
     httpOnly: true,
-    
-  sameSite: "none", 
-  secure: true,   
+    sameSite: "none", 
+    secure: true,   
   }).json({
     success: true,
     message: "Account verify সফল হয়েছে",
-    user,
+    user: {
+        _id: user._id,
+        username: user.username,
+        email: user.email,
+        phone: user.phone
+    },
     token
-  })
+  });
 });
 
 
