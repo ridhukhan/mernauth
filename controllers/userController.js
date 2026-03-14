@@ -88,9 +88,8 @@ export const verifyOtp = catchAsyncError(async (req, res, next) => {
     return next(new ErrorHandler("User পাওয়া যায়নি বা অ্যাকাউন্ট ইতিমধ্যে ভেরিফাইড", 400));
   }
 
-  console.log("OTP match check:", user.verificationCode, "===", Number(otp));
 
-  if (user.verificationCode !== Number(otp)) {
+  if (user.verificationCode != otp) {
     return next(new ErrorHandler("OTP ভুল হয়েছে", 400));
   }
 
