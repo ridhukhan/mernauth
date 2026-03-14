@@ -84,6 +84,9 @@ console.log("req.body:", req.body)
       ? { email, accountVerified: false }
       : { phone, accountVerified: false }
   )
+ console.log("user found:", user)  // ✅ এটা add করো
+  console.log("verificationCode:", user?.verificationCode)  // ✅ এটা add করো
+  console.log("otp comparison:", user?.verificationCode, "===", Number(otp))  // ✅ এটা add করো
 
   if (!user) {
     return next(new ErrorHandler("User পাওয়া যায়নি", 400));
