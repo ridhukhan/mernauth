@@ -70,9 +70,7 @@ export const register = catchAsyncError(async (req, res, next) => {
 
 export const verifyOtp = catchAsyncError(async (req, res, next) => {
   const { email, otp, phone, verificationMethod } = req.body;
-console.log("req.body:", req.body)
- console.log("user.verificationCode:", user?.verificationCode)  
-  if (verificationMethod === "phone") {
+if (verificationMethod === "phone") {
     const phoneRegex = /^\+880\d{10}$/;
     if (!phoneRegex.test(phone)) {
       return next(new ErrorHandler("অবৈধ ফোন নম্বর।", 400));
