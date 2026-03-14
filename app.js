@@ -4,7 +4,8 @@ import { Server } from "socket.io"
 import dotenv from "dotenv"
 import cors from "cors"
 import cookieParser from "cookie-parser"
-dotenv.config({ path: "/etc/secrets/.env" })
+
+dotenv.config()
 export const app=express()
 export const httpServer=createServer(app)
 import {connection} from "./database/dbConnection.js"
