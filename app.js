@@ -13,7 +13,7 @@ import { errorMiddleware } from "./middlewares/error.js"
 import userRoute from "./routes/userRoutes.js"
 import { removeUnverifiedAccount } from "./automation/removeUnverifiedAccount.js"
 app.use(cors({
-    origin:process.env.FRONTEND_URL,
+    origin:"https://2birds.netlify.app",
     credentials:true,
     methods:["GET","POST","PUT","DELETE","OPTIONS"]
 }))
