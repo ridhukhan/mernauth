@@ -71,38 +71,40 @@ export const register = catchAsyncError(async (req, res, next) => {
 export const verifyOtp = catchAsyncError(async (req, res, next) => {
   const { email, otp, phone, verificationMethod } = req.body;
 
-  if (verificationMethod === "phone") {
-    const phoneRegex = /^\+880\d{10}$/;
-    if (!phoneRegex.test(phone)) {
-      return next(new ErrorHandler("অবৈধ ফোন নম্বর।", 400));
-    }
-  }
-
+  // ১. ইউজারকে খুঁজে বের করা
   const user = await User.findOne(
     verificationMethod === "email"
       ? { email, accountVerified: false }
       : { phone, accountVerified: false }
   );
 
+  // যদি ইউজার না পাওয়া যায় (হয়তো আগেই ভেরিফাই হয়ে গেছে বা ভুল ইমেইল/ফোন)
   if (!user) {
-    return next(new ErrorHandler("User পাওয়া যায়নি বা অ্যাকাউন্ট ইতিমধ্যে ভেরিফাইড", 400));
+    return next(new ErrorHandler("User পাওয়া যায়নি বা ইতিমধ্যে ভেরিফাইড।", 400));
   }
 
+  // ২. কনসোল লগ (চেক করার জন্য)
+  console.log("DB OTP:", user.verificationCode, typeof user.verificationCode);
+  console.log("Input OTP:", otp, typeof otp);
 
+  // ৩. আসল চেক (এখানেই ভুল হচ্ছিল)
+  // '!=' ব্যবহার করা হয়েছে যাতে টাইপ আলাদা হলেও ভ্যালু মিললে কাজ হয়
   if (user.verificationCode != otp) {
     return next(new ErrorHandler("OTP ভুল হয়েছে", 400));
   }
 
+  // ৪. সময় শেষ কি না দেখা
   if (Date.now() > user.verificationCodeExpire) {
     return next(new ErrorHandler("OTP এর মেয়াদ শেষ হয়ে গেছে", 400));
   }
 
+  // ৫. সাকসেস হলে ডাটা আপডেট
   user.accountVerified = true;
   user.verificationCode = null;
   user.verificationCodeExpire = null;
-  
   await user.save({ validateBeforeSave: false });
 
+  // ৬. টোকেন পাঠানো
   const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET_KEY, {
     expiresIn: process.env.JWT_EXPIRE
   });
@@ -114,13 +116,8 @@ export const verifyOtp = catchAsyncError(async (req, res, next) => {
     secure: true,   
   }).json({
     success: true,
-    message: "Account verify সফল হয়েছে",
-    user: {
-        _id: user._id,
-        username: user.username,
-        email: user.email,
-        phone: user.phone
-    },
+    message: "অ্যাকাউন্ট ভেরিফিকেশন সফল হয়েছে!",
+    user,
     token
   });
 });
