@@ -19,7 +19,7 @@ app.use(cors({
 const io=new Server(httpServer,{
     cors:{
         origin:"https://2birds.netlify.app",
-        credential:true
+        credentials:true
     }
 })
 const onlineUsers={}
