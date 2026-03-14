@@ -268,15 +268,20 @@ function generateEmailTemplate(otp) {
   `;
 }
 
-export const getAllUsers=catchAsyncError(async(req,res,next)=>{
+export const getAllUsers = catchAsyncError(async (req, res, next) => {
+  // নিশ্চিত করুন ইউজার লগইন করা আছে
+  if (!req.user) {
+    return next(new ErrorHandler("Please login to access this resource", 401));
+  }
 
-const users=await User.find({
-  _id:{$ne: req.user._id}
-}).select("username")
-res.status(200).json({
-  message:"user fetching successfully",
-  success: true,
-  users
-}
-)
-})
+  const users = await User.find({
+    _id: { $ne: req.user._id }, // লগইন করা ইউজার বাদে বাকি সবাই
+    accountVerified: true      // শুধুমাত্র ভেরিফাইড ইউজারদের দেখাবে
+  }).select("username");
+
+  res.status(200).json({
+    success: true,
+    message: "Users fetched successfully",
+    users
+  });
+});
