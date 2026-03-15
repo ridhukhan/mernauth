@@ -9,7 +9,16 @@ import crypto from "crypto"
 
 const client = twilio(process.env.TWILIO_SID, process.env.TWILIO_AUTH_TOKEN);
 
+// Token বানানোর helper function
+const generateToken = (userId) => {
+  return jwt.sign({ id: userId }, process.env.JWT_SECRET_KEY, {
+    expiresIn: process.env.JWT_EXPIRE
+  })
+}
 
+// =====================
+// REGISTER
+// =====================
 export const register = catchAsyncError(async (req, res, next) => {
   const { username, email, phone, password, verificationMethod } = req.body;
 
@@ -33,9 +42,8 @@ export const register = catchAsyncError(async (req, res, next) => {
   }
 
   const hashedPassword = await bcrypt.hash(password, 10);
-
   const otp = Math.floor(100000 + Math.random() * 900000)
-  const otpExpire = Date.now() + 10 * 60 * 1000  
+  const otpExpire = Date.now() + 10 * 60 * 1000
 
   await User.create({
     username, email, phone,
@@ -44,7 +52,6 @@ export const register = catchAsyncError(async (req, res, next) => {
     verificationCodeExpire: otpExpire,
   });
 
-  
   if (verificationMethod === "email") {
     await sendEmail({
       email,
@@ -63,66 +70,60 @@ export const register = catchAsyncError(async (req, res, next) => {
     res.status(200).json({ success: true, message: "otp send ur number,check it now!!" });
 
   } else {
-    return next(new ErrorHandler("otp faild ", 400));
+    return next(new ErrorHandler("otp faild", 400));
   }
 });
 
-
+// =====================
+// VERIFY OTP
+// =====================
 export const verifyOtp = catchAsyncError(async (req, res, next) => {
   const { email, otp, phone, verificationMethod } = req.body;
 
-  // ১. ইউজারকে খুঁজে বের করা
   const user = await User.findOne(
     verificationMethod === "email"
       ? { email, accountVerified: false }
       : { phone, accountVerified: false }
   );
 
-  // যদি ইউজার না পাওয়া যায় (হয়তো আগেই ভেরিফাই হয়ে গেছে বা ভুল ইমেইল/ফোন)
   if (!user) {
-    return next(new ErrorHandler("User পাওয়া যায়নি বা ইতিমধ্যে ভেরিফাইড।", 400));
+    return next(new ErrorHandler("User পাওয়া যায়নি", 400));
   }
 
-  // ২. কনসোল লগ (চেক করার জন্য)
-  console.log("DB OTP:", user.verificationCode, typeof user.verificationCode);
-  console.log("Input OTP:", otp, typeof otp);
-
-  // ৩. আসল চেক (এখানেই ভুল হচ্ছিল)
-  // '!=' ব্যবহার করা হয়েছে যাতে টাইপ আলাদা হলেও ভ্যালু মিললে কাজ হয়
   if (user.verificationCode != otp) {
     return next(new ErrorHandler("OTP ভুল হয়েছে", 400));
   }
 
-  // ৪. সময় শেষ কি না দেখা
   if (Date.now() > user.verificationCodeExpire) {
     return next(new ErrorHandler("OTP এর মেয়াদ শেষ হয়ে গেছে", 400));
   }
 
-  // ৫. সাকসেস হলে ডাটা আপডেট
   user.accountVerified = true;
   user.verificationCode = null;
   user.verificationCodeExpire = null;
   await user.save({ validateBeforeSave: false });
 
-  // ৬. টোকেন পাঠানো
-  const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET_KEY, {
-    expiresIn: process.env.JWT_EXPIRE
-  });
+  const token = generateToken(user._id)
 
-  res.status(200).cookie("token", token, {
-    expires: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-    httpOnly: true,
-    sameSite: "none", 
-    secure: true,   
-  }).json({
-    success: true,
-    message: "অ্যাকাউন্ট ভেরিফিকেশন সফল হয়েছে!",
-    user,
-    token
-  });
+  // ✅ cookie + localStorage দুটোই support করবে
+  res.status(200)
+    .cookie("token", token, {
+      expires: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+      httpOnly: true,
+      sameSite: "none",
+      secure: true,
+    })
+    .json({
+      success: true,
+      message: "Account verify সফল হয়েছে",
+      user,
+      token  // ✅ frontend localStorage এ রাখবে
+    });
 });
 
-
+// =====================
+// LOGIN
+// =====================
 export const login = catchAsyncError(async (req, res, next) => {
   const { email, password } = req.body;
 
@@ -142,44 +143,52 @@ export const login = catchAsyncError(async (req, res, next) => {
     return next(new ErrorHandler("Password ভুল", 400));
   }
 
- 
-  const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET_KEY, {
-    expiresIn: process.env.JWT_EXPIRE
-  })
+  const token = generateToken(user._id)
 
-  res.status(200).cookie("token", token, {
-    expires: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-    httpOnly: true,
-    sameSite: "none", 
-  secure: true,  
-  }).json({
-    success: true,
-    message: "Login সফল",
-    user,
-    token
-  })
+  // ✅ cookie + localStorage দুটোই support করবে
+  res.status(200)
+    .cookie("token", token, {
+      expires: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+      httpOnly: true,
+      sameSite: "none",
+      secure: true,
+    })
+    .json({
+      success: true,
+      message: "Login সফল",
+      user,
+      token  // ✅ frontend localStorage এ রাখবে
+    })
 });
 
-
+// =====================
+// LOGOUT
+// =====================
 export const logout = catchAsyncError(async (req, res, next) => {
-  res.status(200).cookie("token", "", {
-    expires: new Date(Date.now()),
-    httpOnly: true,
-    sameSite: "none", 
-  secure: true,  
-  }).json({
-    success: true,
-    message: "Logout সফল"
-  })
+  res.status(200)
+    .cookie("token", "", {
+      expires: new Date(Date.now()),
+      httpOnly: true,
+      sameSite: "none",
+      secure: true,
+    })
+    .json({
+      success: true,
+      message: "Logout সফল"
+    })
 });
 
-
+// =====================
+// GET USER
+// =====================
 export const getUser = catchAsyncError(async (req, res, next) => {
   const user = req.user;
   res.status(200).json({ success: true, user })
 });
 
-
+// =====================
+// FORGOT PASSWORD
+// =====================
 export const forgotPassword = catchAsyncError(async (req, res, next) => {
   const { email } = req.body;
 
@@ -189,10 +198,9 @@ export const forgotPassword = catchAsyncError(async (req, res, next) => {
     return next(new ErrorHandler("এই email পাওয়া যায়নি", 400));
   }
 
-  
   const resetToken = crypto.randomBytes(20).toString("hex")
   const resetPasswordToken = crypto.createHash("sha256").update(resetToken).digest("hex")
-  const resetPasswordExpire = Date.now() + 15 * 60 * 1000  
+  const resetPasswordExpire = Date.now() + 15 * 60 * 1000
 
   user.resetPasswordToken = resetPasswordToken
   user.resetPasswordExpire = resetPasswordExpire
@@ -212,7 +220,9 @@ export const forgotPassword = catchAsyncError(async (req, res, next) => {
   }
 });
 
-
+// =====================
+// RESET PASSWORD
+// =====================
 export const resetPassword = catchAsyncError(async (req, res, next) => {
   const { token } = req.params;
   const resetPasswordToken = crypto.createHash("sha256").update(token).digest("hex")
@@ -235,24 +245,42 @@ export const resetPassword = catchAsyncError(async (req, res, next) => {
   user.resetPasswordExpire = undefined;
   await user.save();
 
-  const token2 = jwt.sign({ id: user._id }, process.env.JWT_SECRET_KEY, {
-    expiresIn: process.env.JWT_EXPIRE
-  })
+  const token2 = generateToken(user._id)
 
-  res.status(200).cookie("token", token2, {
-    expires: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-    httpOnly: true,
-    sameSite: "none", 
-  secure: true,  
-  }).json({
-    success: true,
-    message: "Password reset সফল",
-    user,
-    token: token2
-  })
+  res.status(200)
+    .cookie("token", token2, {
+      expires: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+      httpOnly: true,
+      sameSite: "none",
+      secure: true,
+    })
+    .json({
+      success: true,
+      message: "Password reset সফল",
+      user,
+      token: token2  // ✅ frontend localStorage এ রাখবে
+    })
 });
 
+// =====================
+// GET ALL USERS
+// =====================
+export const getAllUsers = catchAsyncError(async (req, res, next) => {
+  const users = await User.find({
+    _id: { $ne: req.user._id },
+    accountVerified: true
+  }).select("username");
 
+  res.status(200).json({
+    success: true,
+    message: "Users fetched successfully",
+    users
+  });
+});
+
+// =====================
+// EMAIL TEMPLATE
+// =====================
 function generateEmailTemplate(otp) {
   return `
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #ddd; border-radius: 8px;">
@@ -267,21 +295,3 @@ function generateEmailTemplate(otp) {
     </div>
   `;
 }
-
-export const getAllUsers = catchAsyncError(async (req, res, next) => {
-  // নিশ্চিত করুন ইউজার লগইন করা আছে
-  if (!req.user) {
-    return next(new ErrorHandler("Please login to access this resource", 401));
-  }
-
-  const users = await User.find({
-    _id: { $ne: req.user._id }, // লগইন করা ইউজার বাদে বাকি সবাই
-    accountVerified: true      // শুধুমাত্র ভেরিফাইড ইউজারদের দেখাবে
-  }).select("username");
-
-  res.status(200).json({
-    success: true,
-    message: "Users fetched successfully",
-    users
-  });
-});
